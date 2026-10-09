@@ -1,4 +1,5 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><style>:root{color-scheme:light}body{margin:0}[hidden]{display:none!important}img{max-width:100%}</style>
 <title>Estoque de Peças</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -114,6 +115,7 @@ h1{font:700 28px/1.1 var(--f-display);letter-spacing:-.02em;margin:0}
 @media (max-width:520px){.sum>div{flex-basis:45%;border-bottom:1px solid var(--line)}}
 @media (prefers-reduced-motion:no-preference){.btn{transition:border-color .12s}}
 </style>
+</head><body>
 
 <div class="app">
   <header>
@@ -123,6 +125,7 @@ h1{font:700 28px/1.1 var(--f-display);letter-spacing:-.02em;margin:0}
     </div>
     <div class="hbtns">
       <button class="btn" id="bExport" type="button">Exportar CSV</button>
+      <button class="btn" id="bOut" type="button" hidden>Sair</button>
       <button class="btn primary" id="bNew" type="button">+ Nova peça</button>
     </div>
   </header>
@@ -150,6 +153,7 @@ h1{font:700 28px/1.1 var(--f-display);letter-spacing:-.02em;margin:0}
     <div class="tools">
       <input type="search" id="rq" placeholder="Buscar por OS, quem retirou, peça ou caixa" aria-label="Buscar retiradas">
       <label class="chk"><input type="checkbox" id="rs"> Mostrar revertidas</label>
+      <button class="btn" id="bHist" type="button">+ Registro antigo</button>
     </div>
     <div class="list" id="retList"></div>
     <p class="note" id="retCount"></p>
@@ -162,6 +166,17 @@ h1{font:700 28px/1.1 var(--f-display);letter-spacing:-.02em;margin:0}
 
 <div class="ov" id="ov" hidden></div>
 <div class="toast" id="toast" hidden></div>
+<div class="ov" id="login" hidden>
+  <form class="modal" id="loginForm" autocomplete="on">
+    <h2>Entrar</h2>
+    <p id="loginMsg">Use o e-mail e a senha cadastrados para acessar o estoque.</p>
+    <div class="fld"><label for="lEmail">E-mail</label><input id="lEmail" type="email" autocomplete="username" required></div>
+    <div class="fld"><label for="lPass">Senha</label><input id="lPass" type="password" autocomplete="current-password" required></div>
+    <div class="err" id="lErr"></div>
+    <div class="mact"><span></span><button class="btn primary" id="lOk" type="submit">Entrar</button></div>
+  </form>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 
 <script>
 const $=s=>document.querySelector(s);
@@ -183,8 +198,8 @@ const queues={};
 function enqueue(path,fn){const p=(queues[path]||Promise.resolve()).catch(()=>{}).then(fn);queues[path]=p;return p}
 function putCaixa(cid,nome,items){return enqueue('caixas/'+cid,()=>db.doc('caixas/'+cid).set({nome,items}))}
 function addMov(m){
-  const t=new Date().toISOString(),ym=t.slice(0,7);
-  const entries=(movs[ym]||[]).concat([Object.assign({t,mid:newId()},m)]);
+  const t=m.t||new Date().toISOString(),ym=t.slice(0,7);
+  const entries=(movs[ym]||[]).concat([Object.assign({},m,{t,mid:newId()})]);
   return enqueue('movs/'+ym,()=>db.doc('movs/'+ym).set({entries}));
 }
 function toast(msg){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.h);toast.h=setTimeout(()=>t.hidden=true,2400)}
@@ -232,6 +247,7 @@ function render(){
     `<div><b>${retM}</b><span>retiradas neste mês</span></div>`;
   $('#status').textContent=ui.err?ui.err:!ready?'Carregando estoque…':(canWrite?'Tudo é salvo automaticamente.':'Somente leitura: você não tem permissão para alterar.');
   $('#bNew').disabled=!canWrite||!ready;
+  $('#bHist').disabled=!canWrite||!ui.movsOk;
 
   // fabricantes
   const fabs=[...new Set(all.map(x=>x.fab).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
@@ -248,7 +264,9 @@ function render(){
 }
 function renderList(){
   const L=$('#list');
-  if(!ui.caixasOk){L.innerHTML='<div class="empty"><b>Carregando</b>Buscando suas peças…</div>';$('#count').textContent='';return}
+  if(!ui.caixasOk){
+    L.innerHTML=ui.err?'<div class="empty"><b>Falha ao carregar</b>Não foi possível carregar o estoque. Verifique a conexão e atualize a página.</div>':'<div class="empty"><b>Carregando</b>Buscando suas peças…</div>';
+    $('#count').textContent='';return}
   const r=filtered();
   const th=(k,t)=>`<button type="button" data-s="${k}" ${ui.sort===k?`aria-sort="${ui.dir>0?'ascending':'descending'}"`:''}>${t}${ui.sort===k?(ui.dir>0?' ↑':' ↓'):''}</button>`;
   let h=`<div class="r h"><div>${th('caixa','Caixa')}</div><div>${th('peca','Peça')}</div><div>${th('fab','Fabricante')}</div><div>${th('modelo','Modelo')}</div><div style="text-align:right">${th('qtd','Qtd')}</div><div></div></div>`;
@@ -276,11 +294,11 @@ function renderHist(){
   h+=all.slice(0,500).map(m=>{
     const sg=NEG[m.tipo]?'−':'+';
     const q=m.tipo==='ajuste'?(m.qtd>0?'+':'')+m.qtd:sg+m.qtd;
-    return `<div class="hist"><div class="mono">${esc(new Date(m.t).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}))}</div>
+    return `<div class="hist"><div class="mono">${m.historico?esc(fdate(m.dataRet)):esc(new Date(m.t).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}))}</div>
     <div><span class="pill ${esc(m.tipo)}">${esc(TIPOS[m.tipo]||m.tipo)}</span></div>
     <div class="hd peca">${esc(m.peca)}<span class="obs" style="color:var(--muted)">${esc([m.fab,m.modelo].filter(Boolean).join(' · '))}</span></div>
     <div class="c">${esc(m.caixa)}</div><div class="q" style="font-size:15px">${q}</div>
-    <div class="mono">${m.os?esc(m.os):''}</div><div class="c hd">${esc([m.quem,m.nota].filter(Boolean).join(' · '))}</div></div>`}).join('');
+    <div class="mono">${m.os?esc(m.os):''}</div><div class="c hd">${esc([m.quem,m.veiculo,m.historico?'registro antigo':'',m.nota].filter(Boolean).join(' · '))}</div></div>`}).join('');
   L.innerHTML=h;
 }
 
@@ -292,7 +310,7 @@ function retiradas(){
 }
 function retFiltered(){
   const q=norm(ui.rq).split(/\s+/).filter(Boolean);
-  return retiradas().filter(m=>(ui.rShow||!m.revertida)&&(!q.length||q.every(t=>norm([m.os,m.quem,m.peca,m.fab,m.modelo,m.caixa,m.nota].join(' ')).includes(t))));
+  return retiradas().filter(m=>(ui.rShow||!m.revertida)&&(!q.length||q.every(t=>norm([m.os,m.veiculo,m.quem,m.peca,m.fab,m.modelo,m.caixa,m.nota].join(' ')).includes(t))));
 }
 function renderRet(){
   const L=$('#retList');
@@ -302,13 +320,13 @@ function renderRet(){
   if(!r.length)h+='<div class="empty"><b>Nenhuma retirada</b>Use “Retirar” em uma peça da aba Peças para registrar a saída para uma OS.</div>';
   h+=r.map(m=>`<div class="rt ${m.revertida?'zero':''}">
     <div class="rd mono">${esc(fdate(m.dataRet))}</div>
-    <div class="os">OS ${esc(m.os)}</div>
-    <div class="peca">${esc(m.peca)}<span class="obs">${esc([m.fab,m.modelo].filter(Boolean).join(' · '))}${m.nota?' · '+esc(m.nota):''}</span></div>
-    <div class="c rw">${esc(m.quem)}</div>
-    <div class="rc"><span class="tag">${esc(m.caixa)}</span></div>
+    <div class="os">${m.os?'OS '+esc(m.os):'sem OS'}</div>
+    <div class="peca">${esc(m.peca)}<span class="obs">${esc([m.veiculo,[m.fab,m.modelo].filter(Boolean).join(' '),m.nota].filter(Boolean).join(' · '))}</span></div>
+    <div class="c rw">${esc(m.quem||'—')}</div>
+    <div class="rc">${m.historico?'<span class="tag">Antigo</span>':`<span class="tag">${esc(m.caixa)}</span>`}</div>
     <div class="q">${m.qtd}</div>
-    <div class="acts">${m.revertida?'<span class="pill ajuste">Revertida</span>':`<button class="btn sm ${ui.armed===m.mid?'danger':''}" data-r="${esc(m.mid)}" ${canWrite?'':'disabled'}>${ui.armed===m.mid?'Confirmar?':'Reverter'}</button>`}</div>
-    <div class="c meta">${esc([m.quem,fdate(m.dataRet),m.caixa].filter(Boolean).join(' · '))}</div>
+    <div class="acts">${m.historico?`<button class="btn sm" data-h="${esc(m.mid)}" ${canWrite?'':'disabled'}>Editar</button>`:m.revertida?'<span class="pill ajuste">Revertida</span>':`<button class="btn sm ${ui.armed===m.mid?'danger':''}" data-r="${esc(m.mid)}" ${canWrite?'':'disabled'}>${ui.armed===m.mid?'Confirmar?':'Reverter'}</button>`}</div>
+    <div class="c meta">${esc([m.quem,fdate(m.dataRet),m.historico?'registro antigo':m.caixa].filter(Boolean).join(' · '))}</div>
   </div>`).join('');
   L.innerHTML=h;
   const q=r.reduce((s,m)=>s+(m.revertida?0:m.qtd),0);
@@ -337,6 +355,7 @@ function modalMov(cid,id){
       <div class="fld"><label for="mData">Data da retirada</label><input id="mData" type="date" value="${today()}"></div>
     </div>
     <div class="fld"><label for="mQuem">Quem retirou</label><input id="mQuem" list="dlQuem" autocomplete="off" placeholder="Nome de quem pegou a peça"></div>
+    <div class="fld"><label for="mVei">Veículo</label><input id="mVei" autocomplete="off" placeholder="opcional (ex.: Song Plus)"></div>
   </div>
   <div class="fld"><label for="mNota">Observação</label><input id="mNota" type="text" placeholder="opcional"></div>
   <datalist id="dlOS">${opts('os')}</datalist><datalist id="dlQuem">${opts('quem')}</datalist>
@@ -357,7 +376,7 @@ function modalMov(cid,id){
       if(!quem)return err('Informe quem retirou a peça.');
       if(!dataRet)return err('Informe a data da retirada.');
       if(n>cur.qtd)return err(`Só há ${cur.qtd} em estoque.`);
-      extra={os,quem,dataRet};
+      extra={os,quem,dataRet,veiculo:$('#mVei').value.trim()};
     }
     $('#mOk').disabled=true;
     try{
@@ -366,6 +385,72 @@ function modalMov(cid,id){
       await addMov(Object.assign({tipo,cid,itemId:id,peca:cur.peca,fab:cur.fab,modelo:cur.modelo,caixa:caixas[cid].nome,qtd:n,nota},extra));
       closeModal();toast(tipo==='retirada'?'Retirada registrada para a OS '+extra.os:'Entrada registrada');
     }catch(e){err('Não foi possível salvar. Tente de novo.');$('#mOk').disabled=false}
+  };
+}
+
+function modalHist(m){
+  const it=m||{};
+  const quems=[...new Set(retiradas().map(x=>x.quem).filter(Boolean))].map(v=>`<option value="${esc(v)}">`).join('');
+  openModal(`<h2>${m?'Editar registro antigo':'Registro de requisição antiga'}</h2>
+  <p>Para peças que já saíram e não estão na lista do estoque. Não altera nenhum saldo.</p>
+  <div class="fld"><label for="hP">Peça</label><input id="hP" value="${esc(it.peca)}" autocomplete="off"></div>
+  <div class="grid2">
+    <div class="fld"><label for="hQ">Quantidade</label><input id="hQ" type="number" min="1" step="1" value="${it.qtd||1}"></div>
+    <div class="fld"><label for="hD">Data da retirada</label><input id="hD" type="date" value="${esc(it.dataRet||today())}"></div>
+  </div>
+  <div class="grid2">
+    <div class="fld"><label for="hO">Nº da OS</label><input id="hO" value="${esc(it.os)}" autocomplete="off"></div>
+    <div class="fld"><label for="hV">Veículo</label><input id="hV" value="${esc(it.veiculo)}" autocomplete="off"></div>
+  </div>
+  <div class="fld"><label for="hW">Quem retirou</label><input id="hW" list="dlQ" value="${esc(it.quem)}" autocomplete="off"></div>
+  <div class="fld"><label for="hN">Observação</label><input id="hN" value="${esc(it.nota)}" autocomplete="off"></div>
+  <datalist id="dlQ">${quems}</datalist>
+  <div class="err" id="hErr"></div>
+  <div class="mact"><div>${m?'<button class="btn danger" id="hDel" type="button">Excluir registro</button>':''}</div><div><button class="btn" id="hCancel" type="button">Cancelar</button><button class="btn primary" id="hOk" type="button">Salvar</button></div></div>`);
+  $('#hCancel').onclick=closeModal;
+  const err=t=>{$('#hErr').textContent=t};
+  const save=async del=>{
+    try{
+      if(m){
+        const old=(movs[m.ym]||[]).find(e=>e.mid===m.mid);
+        if(!old)throw new Error('sumiu');
+        await enqueue('movs/'+m.ym,()=>db.doc('movs/'+m.ym).set({entries:(movs[m.ym]||[]).filter(e=>e.mid!==m.mid)}));
+        if(del)return;
+        var base=old;
+      }
+      return base;
+    }catch(e){throw e}
+  };
+  if(m){let armed=false;$('#hDel').onclick=async()=>{
+    if(!armed){armed=true;$('#hDel').textContent='Confirmar exclusão';return}
+    $('#hDel').disabled=true;
+    try{await save(true);closeModal();toast('Registro excluído')}catch(e){err('Não foi possível excluir.');$('#hDel').disabled=false}
+  }}
+  $('#hOk').onclick=async()=>{
+    const peca=$('#hP').value.trim(),qtd=parseInt($('#hQ').value,10),dataRet=$('#hD').value;
+    const os=$('#hO').value.trim(),veiculo=$('#hV').value.trim(),quem=$('#hW').value.trim(),nota=$('#hN').value.trim();
+    if(!peca)return err('Informe o nome da peça.');
+    if(!(qtd>0))return err('Informe a quantidade.');
+    if(!dataRet)return err('Informe a data da retirada.');
+    $('#hOk').disabled=true;
+    const t=dataRet+'T12:00:00.000Z';
+    const fields={tipo:'retirada',historico:true,peca,fab:'',modelo:'',caixa:'',qtd,os,veiculo,quem,dataRet,nota};
+    try{
+      if(!m){await addMov(Object.assign({t},fields))}
+      else{
+        const old=(movs[m.ym]||[]).find(e=>e.mid===m.mid);
+        if(!old)throw new Error('sumiu');
+        const nym=t.slice(0,7);
+        if(nym===m.ym){
+          await enqueue('movs/'+nym,()=>db.doc('movs/'+nym).set({entries:(movs[nym]||[]).map(e=>e.mid===m.mid?Object.assign({},e,fields,{t}):e)}));
+        } else {
+          await enqueue('movs/'+m.ym,()=>db.doc('movs/'+m.ym).set({entries:(movs[m.ym]||[]).filter(e=>e.mid!==m.mid)}));
+          const moved=Object.assign({},old,fields,{t});
+          await enqueue('movs/'+nym,()=>db.doc('movs/'+nym).set({entries:(movs[nym]||[]).concat([moved])}));
+        }
+      }
+      closeModal();toast('Registro salvo');
+    }catch(e){err('Não foi possível salvar. Tente de novo.');$('#hOk').disabled=false}
   };
 }
 
@@ -467,8 +552,8 @@ $('#bExport').onclick=async()=>{
   const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
   let csv,nome;
   if(ui.tab==='ret'){
-    csv='﻿'+['Data;OS;Peça;Fabricante;Modelo;Quem retirou;Caixa;Quantidade;Observação;Situação']
-      .concat(retFiltered().map(m=>[fdate(m.dataRet),m.os,m.peca,m.fab,m.modelo,m.quem,m.caixa,m.qtd,m.nota||'',m.revertida?'Revertida':'Retirada'].map(q).join(';'))).join('\r\n');
+    csv='﻿'+['Data;OS;Veículo;Peça;Quem retirou;Origem;Quantidade;Observação;Situação']
+      .concat(retFiltered().map(m=>[fdate(m.dataRet),m.os,m.veiculo||'',m.peca,m.quem,m.historico?'Registro antigo':m.caixa,m.qtd,m.nota||'',m.revertida?'Revertida':'Retirada'].map(q).join(';'))).join('\r\n');
     nome='pecas-retiradas-';
   } else {
     csv='﻿'+['Caixa;Peça;Fabricante;Modelo;Quantidade;Observação']
@@ -476,8 +561,9 @@ $('#bExport').onclick=async()=>{
     nome='estoque-';
   }
   try{
-    if(!dl)return toast('Exportação indisponível nesta tela');
-    await dl.save({filename:nome+today()+'.csv',data:csv});
+    const b=new Blob([csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=nome+today()+'.csv';
+    document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
     toast('Arquivo salvo');
   }catch(e){if(e&&e.code!=='declined')toast('Não foi possível exportar')}
 };
@@ -489,7 +575,10 @@ $('#fab').onchange=e=>{ui.fab=e.target.value;renderList()};
 $('#hz').onchange=e=>{ui.hz=e.target.checked;renderList()};
 $('#rq').oninput=e=>{ui.rq=e.target.value;renderRet()};
 $('#rs').onchange=e=>{ui.rShow=e.target.checked;renderRet()};
+$('#bHist').onclick=()=>modalHist(null);
 $('#retList').onclick=async e=>{
+  const h=e.target.closest('[data-h]');
+  if(h){const mm=retiradas().find(x=>x.mid===h.dataset.h);if(mm)modalHist(mm);return}
   const b=e.target.closest('[data-r]');if(!b)return;
   const mid=b.dataset.r;
   if(ui.armed!==mid){ui.armed=mid;renderRet();clearTimeout(ui.at);ui.at=setTimeout(()=>{ui.armed='';renderRet()},4000);return}
@@ -514,17 +603,59 @@ document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 
 /* ---------- inicialização ---------- */
-(async()=>{
-  render();
-  try{
-    const c=window.claude;if(!c||!c.use)throw 0;
-    db=await c.use('db');dl=await c.use('downloads');
-    const user=await c.use('user');
-    if(user&&user.can){try{canWrite=(await user.can('data.write'))!==false}catch(e){}}
-  }catch(e){}
-  if(!db){ui.err='Não foi possível abrir o armazenamento. Abra esta página logado no Claude.';ui.caixasOk=false;return render()}
+const CFG={url:'https://cjjzesmhdaprmynoagzp.supabase.co',key:'sb_publishable_L4NKYKDdPVrGMtrV9gBmRw_JG1yXC-9'};
+let sb=null;
+const TBL='docs';
+function makeDb(){
+  return {
+    doc(path){return {
+      async set(data){const r=await sb.from(TBL).upsert({path,data,updated_at:new Date().toISOString()});if(r.error)throw r.error}
+    }},
+    collection(name){return {
+      onSnapshot(next,err){
+        let alive=true;
+        const load=async()=>{
+          const r=await sb.from(TBL).select('path,data').like('path',name+'/%');
+          if(!alive)return;
+          if(r.error){if(err)err(r.error);return}
+          next({docs:r.data.map(x=>({id:x.path.slice(name.length+1),data:()=>x.data}))});
+        };
+        load();
+        const ch=sb.channel('rt-'+name).on('postgres_changes',{event:'*',schema:'public',table:TBL},()=>load()).subscribe();
+        const poll=setInterval(load,30000);
+        return ()=>{alive=false;clearInterval(poll);sb.removeChannel(ch)};
+      }
+    }}
+  };
+}
+function startApp(){
+  $('#login').hidden=true;$('#bOut').hidden=false;
+  db=makeDb();canWrite=true;render();
   db.collection('caixas').onSnapshot(s=>{caixas={};s.docs.forEach(d=>{caixas[d.id]=d.data()});ui.caixasOk=true;render()},e=>{ui.err='Falha ao carregar o estoque.';render()});
   db.collection('movs').onSnapshot(s=>{movs={};s.docs.forEach(d=>{movs[d.id]=(d.data().entries||[])});ui.movsOk=true;render()},e=>{});
+}
+function showLogin(msg){
+  $('#login').hidden=false;
+  if(msg)$('#loginMsg').textContent=msg;
+}
+$('#bOut').onclick=async()=>{try{await sb.auth.signOut()}catch(e){}location.reload()};
+$('#loginForm').onsubmit=async e=>{
+  e.preventDefault();$('#lErr').textContent='';$('#lOk').disabled=true;
+  try{
+    const r=await sb.auth.signInWithPassword({email:$('#lEmail').value.trim(),password:$('#lPass').value});
+    if(r.error)throw r.error;
+    startApp();
+  }catch(x){$('#lErr').textContent='E-mail ou senha incorretos.'}
+  $('#lOk').disabled=false;
+};
+(async()=>{
+  render();
+  if(!window.supabase||CFG.url.indexOf('__')===0){showLogin('Site ainda não configurado: faltam a URL e a chave do banco de dados.');$('#lOk').disabled=true;return}
+  try{
+    sb=window.supabase.createClient(CFG.url,CFG.key);
+    const r=await sb.auth.getSession();
+    if(r.data&&r.data.session)startApp();else showLogin();
+  }catch(e){showLogin('Não foi possível conectar ao banco de dados.')}
 })();
 </script>
 
